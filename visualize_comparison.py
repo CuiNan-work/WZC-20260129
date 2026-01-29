@@ -29,6 +29,11 @@ def simulate_trajectory(env, strategy='improved', steps=20, seed=42):
         rewards: 每步奖励
         delays: 每步时延
     """
+    # 常量定义
+    MIN_TARGET_DISTANCE = 20.0  # UAV到目标的最小距离（米）
+    BOUNDARY_MARGIN = 100.0      # 边界区域宽度（米）
+    DIRECTION_THRESHOLD = 5.0    # 方向判断阈值（米）
+    
     np.random.seed(seed)
     obs, _ = env.reset()
     
@@ -58,13 +63,13 @@ def simulate_trajectory(env, strategy='improved', steps=20, seed=42):
                 direction = target - env.uav_positions[i]
                 
                 # 选择移动动作
-                if np.linalg.norm(direction) < 20:  # 已经很近了
+                if np.linalg.norm(direction) < MIN_TARGET_DISTANCE:  # 已经很近了
                     move_action = 0  # 不动
                 else:
                     # 根据方向选择动作
                     dx, dy = direction
                     
-                    if abs(dx) < 5 and abs(dy) < 5:
+                    if abs(dx) < DIRECTION_THRESHOLD and abs(dy) < DIRECTION_THRESHOLD:
                         move_action = 0  # 不动
                     elif abs(dx) > abs(dy):
                         if dx > 0:
@@ -97,7 +102,8 @@ def simulate_trajectory(env, strategy='improved', steps=20, seed=42):
                 x, y = env.uav_positions[i]
                 
                 # 如果已经在边界，不动
-                if x < 100 or x > area_size - 100 or y < 100 or y > area_size - 100:
+                if x < BOUNDARY_MARGIN or x > area_size - BOUNDARY_MARGIN or \
+                   y < BOUNDARY_MARGIN or y > area_size - BOUNDARY_MARGIN:
                     move_action = 0
                 else:
                     # 向最近的边界移动
@@ -119,9 +125,9 @@ def simulate_trajectory(env, strategy='improved', steps=20, seed=42):
                 
                 action.append(move_action)
             
-            # 用户随机选择
+            # 用户随机选择（包括本地计算选项）
             for k in range(num_users):
-                action.append(np.random.randint(1, num_uavs + 1))
+                action.append(np.random.randint(0, num_uavs + 1))
         
         else:  # random
             action = env.action_space.sample()
@@ -142,6 +148,9 @@ def simulate_trajectory(env, strategy='improved', steps=20, seed=42):
 
 def visualize_comparison(save_path='trajectory_comparison.png'):
     """可视化不同策略的轨迹对比"""
+    
+    # 可视化常量
+    USER_COVERAGE_RADIUS = 50.0  # 用户覆盖半径（米）
     
     # 创建三个环境实例
     env_improved = UAVEnv()
@@ -205,7 +214,7 @@ def visualize_comparison(save_path='trajectory_comparison.png'):
             ax.plot(users[k, 0], users[k, 1], 
                    marker='^', markersize=12, color='orange',
                    markeredgecolor='black', markeredgewidth=1.5)
-            ax.add_patch(Circle(users[k], 50, 
+            ax.add_patch(Circle(users[k], USER_COVERAGE_RADIUS, 
                                color='orange', alpha=0.15, linewidth=0))
         
         # 绘制 UAV 轨迹

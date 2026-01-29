@@ -34,8 +34,10 @@ class TrainingCallback(BaseCallback):
     
     def _on_rollout_end(self) -> None:
         """在每个 rollout 结束时调用"""
-        if self.verbose > 0 and self.num_timesteps % 10000 < 2048:
-            print(f"\n=== Rollout {self.num_timesteps // 2048} completed ===")
+        # 每个rollout是n_steps步（默认2048）
+        rollout_num = self.num_timesteps // 2048
+        if self.verbose > 0 and self.num_timesteps % (2048 * 5) < 2048:  # 每5个rollout打印一次
+            print(f"\n=== Rollout {rollout_num} completed ===")
 
 
 def train_model(
@@ -66,6 +68,10 @@ def train_model(
     print("\n2. 创建 PPO 模型...")
     import torch
     
+    # 检测是否有GPU可用
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"   使用设备: {device}")
+    
     policy_kwargs = dict(
         net_arch=dict(pi=[256, 256], vf=[256, 256]),
         activation_fn=torch.nn.ReLU
@@ -86,7 +92,7 @@ def train_model(
         max_grad_norm=0.5,
         policy_kwargs=policy_kwargs,
         verbose=1,
-        device="cpu"
+        device=device
     )
     print(f"   ✓ 模型创建成功")
     

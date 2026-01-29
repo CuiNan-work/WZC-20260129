@@ -57,9 +57,14 @@ class UAVEnv(gym.Env):
         # 观察空间：[UAV位置(6), 用户位置(12), UAV负载(3), 历史时延(1)]
         # 总共 22 维
         obs_dim = num_uavs * 2 + num_users * 2 + num_uavs + 1
+        # UAV和用户位置的范围是[0, area_size]，负载和时延可以是任意正值
+        low = np.zeros(obs_dim, dtype=np.float32)
+        high = np.full(obs_dim, area_size, dtype=np.float32)
+        # 负载和时延维度使用更大的上界
+        high[num_uavs * 2 + num_users * 2:] = 1e6
         self.observation_space = spaces.Box(
-            low=0.0, 
-            high=area_size, 
+            low=low, 
+            high=high, 
             shape=(obs_dim,), 
             dtype=np.float32
         )
@@ -161,16 +166,18 @@ class UAVEnv(gym.Env):
     def _update_uav_positions(self, uav_actions):
         """根据动作更新 UAV 位置"""
         # 定义 9 个移动方向：0=不动, 1-8=八个方向
+        # 对角线方向已归一化，保持速度一致
+        sqrt2_inv = 1.0 / np.sqrt(2)
         move_vectors = {
-            0: [0, 0],           # 不动
-            1: [0, 1],           # 上
-            2: [0, -1],          # 下
-            3: [-1, 0],          # 左
-            4: [1, 0],           # 右
-            5: [-1, 1],          # 左上
-            6: [1, 1],           # 右上
-            7: [-1, -1],         # 左下
-            8: [1, -1]           # 右下
+            0: [0, 0],                      # 不动
+            1: [0, 1],                      # 上
+            2: [0, -1],                     # 下
+            3: [-1, 0],                     # 左
+            4: [1, 0],                      # 右
+            5: [-sqrt2_inv, sqrt2_inv],     # 左上
+            6: [sqrt2_inv, sqrt2_inv],      # 右上
+            7: [-sqrt2_inv, -sqrt2_inv],    # 左下
+            8: [sqrt2_inv, -sqrt2_inv]      # 右下
         }
         
         for i, action in enumerate(uav_actions):
@@ -280,9 +287,17 @@ class UAVEnv(gym.Env):
         2. 增加通信时延的权重
         3. 对边界附近的 UAV 位置增加额外惩罚
         """
+        # 奖励权重（可调参数）
+        DELAY_WEIGHT = 10.0       # 时延惩罚权重
+        DISTANCE_WEIGHT = 5.0     # 距离惩罚权重
+        BOUNDARY_WEIGHT = 3.0     # 边界惩罚权重
+        FAIRNESS_WEIGHT = 2.0     # 公平性奖励权重
+        LOAD_WEIGHT = 0.5         # 负载均衡惩罚权重
+        DISTANCE_NORM = 100.0     # 距离归一化因子（米）
+        
         # 1. 时延惩罚（主要奖励信号）
         avg_delay = np.mean(total_delays)
-        delay_penalty = avg_delay * 10.0  # 增加权重
+        delay_penalty = avg_delay * DELAY_WEIGHT
         
         # 2. 距离惩罚（新增 - 直接惩罚 UAV 到用户的距离）
         distance_penalty = 0.0
@@ -298,9 +313,9 @@ class UAVEnv(gym.Env):
                 min_dist = min(min_dist, dist_3d)
             
             # 距离惩罚：使用二次方增加敏感度
-            distance_penalty += (min_dist / 100.0) ** 2  # 归一化后平方
+            distance_penalty += (min_dist / DISTANCE_NORM) ** 2
         
-        distance_penalty *= 5.0  # 距离惩罚权重
+        distance_penalty *= DISTANCE_WEIGHT
         
         # 3. 边界惩罚（防止 UAV 停留在边界）
         boundary_penalty = 0.0
@@ -321,14 +336,14 @@ class UAVEnv(gym.Env):
             if dist_to_boundary < boundary_margin:
                 boundary_penalty += (1.0 - dist_to_boundary / boundary_margin) ** 2
         
-        boundary_penalty *= 3.0  # 边界惩罚权重
+        boundary_penalty *= BOUNDARY_WEIGHT
         
         # 4. 负载均衡奖励（基于 Jain 指数）
-        fairness_reward = jain_index * 2.0
+        fairness_reward = jain_index * FAIRNESS_WEIGHT
         
         # 5. UAV 负载均衡惩罚
         load_imbalance = np.std(self.uav_load) if np.sum(self.uav_load) > 0 else 0.0
-        load_penalty = load_imbalance * 0.5
+        load_penalty = load_imbalance * LOAD_WEIGHT
         
         # 6. 组合奖励
         reward = (
